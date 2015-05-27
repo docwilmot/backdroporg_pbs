@@ -59,52 +59,55 @@
  *   Returns an array of results, formatted how Project Browser likes it
  */
 function backdroporg_pbs_project_browser_server_query($filters) {
-  $query = db_select('node', 'p')
-    ->fields('p');
+  $query = new EntityFieldQuery();
+  $entities = $query->entityCondition('entity_type', 'node');
+  $query->entityCondition('bundle', 'project');
+  $query->propertyCondition('status', 1);
 
+  // This requires a custom field
+/*****************
   // Filter out projects based on type.
   if (isset($filters['type'])) {
-    $query->condition('p.type', 'project');
+    $query->fieldCondition('project_type', 'value', check_plain($filters['type']), '=');
   }
+ *****************/
 
+  // This requires a custom field
 /*****************
-// No version number fields in use yet.
-   // Filter out projects based on drupal version number.
+  // Filter out projects based on drupal version number.
   if (isset($filters['version'])) {
-    $query->condition('p.api_version', check_plain($filters['version']));
+    $query->fieldCondition('api_version', 'value', check_plain($filters['version']), '=');
   }
+ *****************/
 
   // Filter out projects based on categories number.
   if (isset($filters['categories']) && is_array($filters['categories']) && !empty($filters['categories'])) {
     // TODO
   }
   
- *****************/
  
   // Filter out projects based on the text query.
   if (!empty($filters['text'])) {
-    $query->condition('p.title', '%' . db_like($filters['text']) . '%', 'LIKE');
+    $query->propertyCondition('title', 'value', '%' . $filters['text'] . '%', 'LIKE');
   }
 
   // Only send back the requested amount.
   $start = $filters['page'] * $filters['requested'];
-  $count_query = $query;
-  $count_result = $count_query->execute();
   $query->range($start, $filters['requested']);
+
 
   // Add the sorting.
   if (!empty($filters['order_by'])) {
     $sort_direction = (!empty($filters['sort']) && $filters['sort'] == 'asc') ? 'ASC' : 'DESC';
     switch ($filters['order_by']) {
       case 'title':
-        $query->orderBy('p.title', $sort_direction);
+        $query->propertyOrderBy('title', $sort_direction);
         break;
 
 /*****************
-       case 'usage':
+      case 'usage':
         $query->orderBy('p.usage_count', $sort_direction);
         break;
-****************/
       case 'score':
         if (!empty($filters['text'])) {
           $query->addExpression("MATCH(p.title) AGAINST (:txtw)", 'title_rel', array(':txtw' => $filters['text']));
@@ -112,59 +115,60 @@ function backdroporg_pbs_project_browser_server_query($filters) {
           $query->orderBy('title_rel', $sort_direction);
           $query->orderBy('desc_rel', $sort_direction);
         }
-/*****************
          else {
           // Fallback to just use usage_count.
           $query->orderBy('p.usage_count', $sort_direction);
         }
+        break;
 ****************/
-      break;
 
       case 'name':
-        $query->orderBy('p.author', $sort_direction);
+        $query->propertyOrderBy('name', $sort_direction);
         break;
 
       case 'latest_release':
-        $query->orderBy('p.updated', $sort_direction);
+        $query->propertyOrderBy('updated', $sort_direction);
         break;
     }
   }
 
   $result = $query->execute();
-  foreach ($result as $row) {
-    $load[] = $row->nid;
-  }
-  $nodes = node_load_multiple($load);
+  $count_result = count($result);
   
   $projects = array();
-  foreach ($nodes as $row) {
-    // Build the description field
-    $descr = field_get_items('node', $row, 'body');
-    $descr_field = reset($descr);
-    $descr_value = $descr_field['value'];
+  
+  if (isset($result['node'])) {
+    $nids = array_keys($result['node']);
+    $nodes = node_load_multiple($nids);
+    foreach ($nodes as $node) {
+      // Build the description field
+      $descr = field_get_items('node', $node, 'body');
+      $descr_field = reset($descr);
+      $descr_value = $descr_field['value'];
 
-    $projects[$row->project['name']] = array(
-      'type' => 'module',
-      'title' => $row->title,
-      'name' => $row->project['name'],
-      'drupal version' => '',
-      'author' => $row->name,
-      'description' => $descr_value,
-      'categories' => '',
-      'image' => '',
-      'usage' => '',
-      'project url' => url($row->path['source'], array('absolute' => TRUE)),
-      'project status url' => 'http://updates.backdropcms.org/release-history/' . $row->project['name'] . '/' . $filters['version'] . '.x',
-      'last updated' => $row->changed,
-      'maintenance status' => '',
-      'development status' => '',
-      'rating' => '',
-      'includes' => array(),
-    );
-  }
+      $projects[$node->project['name']] = array(
+        'type' => 'module', // This needs changing to a field value
+        'title' => $node->title,
+        'name' => $node->project['name'],
+        'drupal version' => '', // This needs changing to a field value
+        'author' => $node->name,
+        'description' => $descr_value,
+        'categories' => '', // This needs changing to a field value
+        'image' => '', // This needs changing to a field value
+        'usage' => '', // This needs changing to a field value
+        'project url' => url($node->path['source'], array('absolute' => TRUE)),
+        'project status url' => 'https://updates.backdropcms.org/release-history/' . $node->project['name'] . '/' . $filters['version'] . '.x',
+        'last updated' => $node->changed,
+        'maintenance status' => '', // This needs changing to a field value
+        'development status' => '', // This needs changing to a field value
+        'rating' => '', // This needs changing to a field value
+        'includes' => array(), // This needs changing to a field value
+      );
+    }
+  }  
 
   return array(
-    'total' => $count_result->rowCount(),
+    'total' => $count_result,
     'projects' => $projects,
   );
 }
