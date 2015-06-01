@@ -58,7 +58,7 @@
  * @return array
  *   Returns an array of results, formatted how Project Browser likes it
  */
-function backdroporg_pbs_project_browser_server_query($filters) {
+function borg_pbs_project_browser_server_query($filters) {
   $query = new EntityFieldQuery();
   $entities = $query->entityCondition('entity_type', 'node');
   $query->entityCondition('bundle', 'project');
@@ -190,7 +190,7 @@ function backdroporg_pbs_project_browser_server_query($filters) {
  * @return array
  *   Returns an array of categories
  */
-function backdroporg_pbs_project_browser_server_categories($type) {
+function borg_pbs_project_browser_server_categories($type) {
   $categories = array();
 
   switch ($type) {
