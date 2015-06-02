@@ -204,5 +204,7 @@ function borg_pbs_project_browser_server_categories($type) {
       );
   }
 
-  return $categories;
+  return array(); 
+  // Categories not yet set up on Backdrop.org.
+  // return $categories;
 }
