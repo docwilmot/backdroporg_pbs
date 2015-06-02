@@ -59,116 +59,111 @@
  *   Returns an array of results, formatted how Project Browser likes it
  */
 function borg_pbs_project_browser_server_query($filters) {
-  $query = new EntityFieldQuery();
-  $entities = $query->entityCondition('entity_type', 'node');
-  $query->entityCondition('bundle', 'project');
-  $query->propertyCondition('status', 1);
+  
+/**********************************************************
+// This is a subquery to determine a project's available core version numbers
+// Since we're currently only at v1.x, this is commented out.
+  if (isset($filters['version'])) {
+    $subquery = db_select('node', 's');
+    $subquery->fields('s.project_nid');
+    $subquery->condition('s.version', $filters['version']);
+    $subquery->condition('s.type', 'project_release');
+  }
+**********************************************************/
+  
+  $query = db_select('node', 'n')
+    ->fields('n');
 
-  // This requires a custom field
-/*****************
   // Filter out projects based on type.
   if (isset($filters['type'])) {
-    $query->fieldCondition('project_type', 'value', check_plain($filters['type']), '=');
+    $query->condition('n.type', 'project_' . $filters['type']);
   }
- *****************/
 
-  // This requires a custom field
-/*****************
-  // Filter out projects based on drupal version number.
+
+/**********************************************************
+// This is a subquery to determine a project's available core version numbers
+// Since we're currently only at v1.x, this is commented out.
+   //Filter out projects based on Backdrop version number.
   if (isset($filters['version'])) {
-    $query->fieldCondition('api_version', 'value', check_plain($filters['version']), '=');
+    $query->condition('n.nid', $subquery, 'IN');
   }
- *****************/
-
-  // Filter out projects based on categories number.
-  if (isset($filters['categories']) && is_array($filters['categories']) && !empty($filters['categories'])) {
-    // TODO
-  }
-  
+**********************************************************/
  
   // Filter out projects based on the text query.
   if (!empty($filters['text'])) {
-    $query->propertyCondition('title', 'value', '%' . $filters['text'] . '%', 'LIKE');
+    $query->condition('n.title', '%' . db_like($filters['text']) . '%', 'LIKE');
   }
 
   // Only send back the requested amount.
   $start = $filters['page'] * $filters['requested'];
+  $count_query = $query;
+  $count_result = $count_query->execute();
   $query->range($start, $filters['requested']);
-
 
   // Add the sorting.
   if (!empty($filters['order_by'])) {
     $sort_direction = (!empty($filters['sort']) && $filters['sort'] == 'asc') ? 'ASC' : 'DESC';
     switch ($filters['order_by']) {
       case 'title':
-        $query->propertyOrderBy('title', $sort_direction);
+        $query->orderBy('n.title', $sort_direction);
         break;
 
-/*****************
-      case 'usage':
-        $query->orderBy('p.usage_count', $sort_direction);
+       case 'usage':
+        // Add a usage query as an expression
+        $query->addExpression("(SELECT w.count FROM project_usage_week_project w WHERE w.nid = n.nid)", 'usage_query');
+        // Sort by usage now.
+        $query->orderBy('usage_query', $sort_direction);
         break;
+        
       case 'score':
-        if (!empty($filters['text'])) {
-          $query->addExpression("MATCH(p.title) AGAINST (:txtw)", 'title_rel', array(':txtw' => $filters['text']));
-          $query->addExpression("MATCH(p.description) AGAINST (:txtw)", 'desc_rel', array(':txtw' => $filters['text']));
-          $query->orderBy('title_rel', $sort_direction);
-          $query->orderBy('desc_rel', $sort_direction);
-        }
-         else {
-          // Fallback to just use usage_count.
-          $query->orderBy('p.usage_count', $sort_direction);
-        }
-        break;
-****************/
+      break;
 
       case 'name':
-        $query->propertyOrderBy('name', $sort_direction);
+        $query->orderBy('n.uid', $sort_direction);
         break;
 
       case 'latest_release':
-        $query->propertyOrderBy('updated', $sort_direction);
+        $query->orderBy('n.changed', $sort_direction);
         break;
     }
   }
-
   $result = $query->execute();
-  $count_result = count($result);
+  
+  foreach ($result as $row) {
+    $load[] = $row->nid;
+  }
+  $nodes = node_load_multiple($load);
   
   $projects = array();
-  
-  if (isset($result['node'])) {
-    $nids = array_keys($result['node']);
-    $nodes = node_load_multiple($nids);
-    foreach ($nodes as $node) {
-      // Build the description field
-      $descr = field_get_items('node', $node, 'body');
-      $descr_field = reset($descr);
-      $descr_value = $descr_field['value'];
+  foreach ($nodes as $node) {
+    // Build the description field
+    $descr = field_get_items('node', $node, 'body');
+    $descr_field = reset($descr);
+    $descr_value = $descr_field['value'];
+    
+    $usage = 
 
-      $projects[$node->project['name']] = array(
-        'type' => 'module', // This needs changing to a field value
-        'title' => $node->title,
-        'name' => $node->project['name'],
-        'drupal version' => '', // This needs changing to a field value
-        'author' => $node->name,
-        'description' => $descr_value,
-        'categories' => '', // This needs changing to a field value
-        'image' => '', // This needs changing to a field value
-        'usage' => '', // This needs changing to a field value
-        'project url' => url($node->path['source'], array('absolute' => TRUE)),
-        'project status url' => 'https://updates.backdropcms.org/release-history/' . $node->project['name'] . '/' . $filters['version'] . '.x',
-        'last updated' => $node->changed,
-        'maintenance status' => '', // This needs changing to a field value
-        'development status' => '', // This needs changing to a field value
-        'rating' => '', // This needs changing to a field value
-        'includes' => array(), // This needs changing to a field value
-      );
-    }
-  }  
-
+    $projects[$node->project['name']] = array(
+      'type' => 'module',
+      'title' => $node->title,
+      'name' => $node->project['name'],
+      'backdrop version' => '',
+      'author' => $node->name,
+      'description' => $descr_value,
+      'categories' => '',
+      'image' => '',
+      'usage' => project_usage_get_project_total_usage($node->nid),
+      'project url' => url('node/' . $node->nid, array('absolute' => TRUE)),
+      'project status url' => 'http://updates.backdropcms.org/release-history/' . $node->project['name'] . '/' . $filters['version'] . '.x',
+      'last updated' => $node->changed,
+      'maintenance status' => '',
+      'development status' => '',
+      'rating' => '',
+      'includes' => array(),
+    );
+  }
   return array(
-    'total' => $count_result,
+    'total' => $count_result->rowCount(),
     'projects' => $projects,
   );
 }
